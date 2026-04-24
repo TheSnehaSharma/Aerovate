@@ -46,21 +46,45 @@ async def root():
 async def simulate(req: TelemetryRequest):
     aero_sess = load_res("aero_model.onnx")
     aero_cfg = load_res("aero_scaler.json", False)
+    noise_sess = load_res("noise_model.onnx")
+    noise_cfg = load_res("noise_scaler.json", False)
     
     try:
-        # 1. Physics Calculations
+        # --- 1. AERO FEATURE VECTOR (64 Features) ---
+        # [62 Coeffs] + [Reynolds] + [Alpha]
         re_num = (1.225 * req.velocity * req.chord_length) / 1.81e-5
+        aero_ml_input = req.geometry_coeffs + [re_num, req.alpha]
+        aero_features = np.array([aero_ml_input], dtype=np.float32)
 
-        # 2. ML Prediction
-        Cl, Cd = 0.5, 0.05 # Default fallbacks
+        # --- 2. NOISE FEATURE VECTOR (5 Features) ---
+        # Features: Frequency, AoA, Chord, Velocity, Suction_Side_Displacement
+        # We'll use 1000Hz as a standard reference frequency
+        # SSD is usually ~0.002-0.01 depending on the airfoil
+        ssd_estimate = 0.002663 * (1 + abs(req.alpha) * 0.1) 
+        
+        noise_ml_input = [
+            1000.0,            # Frequency (Hz)
+            req.alpha,         # Angle of Attack
+            req.chord_length,  # Chord Length
+            req.velocity,      # Free-stream Velocity
+            ssd_estimate       # Suction Side Displacement
+        ]
+        noise_features = np.array([noise_ml_input], dtype=np.float32)
+
+        # --- 3. RUN PREDICTIONS ---
+        Cl, Cd, Noise_dB = 0.5, 0.05, 75.0
+
         if aero_sess and aero_cfg:
-            ml_input = req.geometry_coeffs + [re_num, req.alpha]
-            features = np.array([ml_input], dtype=np.float32)
-            scaled = (features - np.array(aero_cfg['mean'])) / np.array(aero_cfg['scale'])
-            res = aero_sess.run(None, {aero_sess.get_inputs()[0].name: scaled.astype(np.float32)})[0]
-            Cl, Cd = res[0][0], res[0][1]
+            scaled_aero = (aero_features - np.array(aero_cfg['mean'])) / np.array(aero_cfg['scale'])
+            a_res = aero_sess.run(None, {aero_sess.get_inputs()[0].name: scaled_aero.astype(np.float32)})[0]
+            Cl, Cd = float(a_res[0][0]), float(a_res[0][1])
 
-        # 3. Physics Scaling
+        if noise_sess and noise_cfg:
+            scaled_noise = (noise_features - np.array(noise_cfg['mean'])) / np.array(noise_cfg['scale'])
+            n_res = noise_sess.run(None, {noise_sess.get_inputs()[0].name: scaled_noise.astype(np.float32)})[0]
+            Noise_dB = float(n_res[0][0])
+
+        # --- 4. PHYSICS MATH ---
         q = 0.5 * 1.225 * (req.velocity ** 2)
         Lift_N = q * req.wing_area * Cl
         Drag_N = abs(q * req.wing_area * Cd)
@@ -69,26 +93,26 @@ async def simulate(req: TelemetryRequest):
         FoS = req.material_yield_strength / max(1.0, Stress_MPa)
         V_stall = np.sqrt(req.weight_n / (0.5 * 1.225 * req.wing_area * 1.5))
         
-        # 4. THE CRITICAL FIX: Explicitly cast everything to standard Python types
-        # This prevents the "numpy.bool is not iterable" error
+        # Range is influenced by Aero Efficiency (L/D)
+        Range_km = (Cl / max(0.001, Cd)) * (req.velocity / 10.0) * 5.0
+
         return {
             "aero": {
-                "Cl": float(Cl),
-                "Cd": float(Cd),
-                "Lift_N": float(Lift_N),
-                "Drag_N": float(Drag_N)
+                "Cl": float(Cl), "Cd": float(Cd), 
+                "Lift_N": float(Lift_N), "Drag_N": float(Drag_N)
             },
             "structure": {
-                "Stress_MPa": float(Stress_MPa),
-                "FoS": float(min(10.0, FoS))
+                "Stress_MPa": float(Stress_MPa), "FoS": float(min(10.0, FoS))
             },
             "performance": {
                 "V_stall_m_s": float(V_stall),
-                "Takeoff_Ready": bool(req.velocity > V_stall), # Forced standard bool
-                "Range_km": 1200
+                "Takeoff_Ready": bool(req.velocity > V_stall),
+                "Range_km": float(Range_km)
             },
-            "noise": {"Noise_dB": 75.0},
-            "status": "FRACTURE" if float(FoS) <= 1.0 else ("STRESSED" if float(FoS) <= 1.5 else "OPTIMAL")
+            "noise": {
+                "Noise_dB": float(Noise_dB)
+            },
+            "status": "FRACTURE" if FoS <= 1.0 else ("STRESSED" if FoS <= 1.5 else "OPTIMAL")
         }
     except Exception as e:
         return {"status": "ERROR", "message": str(e)}
