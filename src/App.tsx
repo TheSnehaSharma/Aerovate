@@ -102,6 +102,19 @@ export default function App() {
     angle: 0, r: 10, cx: 0, cy: 0
   })));
 
+  useEffect(() => {
+    // Update the Tab Name
+    document.title = "Aerovate | Rapid Aero Prototyping";
+  
+    // Update the Tab Icon (Favicon)
+    const link = document.querySelector("link[rel~='icon']") || document.createElement('link');
+    // @ts-ignore
+    link.rel = 'icon';
+    // Using a data URI for a cyan "A" icon so you don't need a separate file
+    link.href = 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="%2322d3ee" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 22 12 2l10 20M6 12h12"/></svg>';
+    document.getElementsByTagName('head')[0].appendChild(link);
+  }, []);
+
   // =======================================================================
   // LIVE API CONNECTION (Strict ML Data Only)
   // =======================================================================
