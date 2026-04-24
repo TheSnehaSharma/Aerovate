@@ -107,65 +107,68 @@ export default function App() {
   // =======================================================================
   useEffect(() => {
       const fetchRealPhysics = async () => {
-        // 1. Map the UI selection (e.g. 'Clark Y') to the JSON key (e.g. 'clarky')
         const jsonKey = AIRFOIL_MAP[airfoil];
         
-        // 2. Extract the real 62 coefficients from your imported airfoil_database.json
-        const realCoeffs = airfoilDatabase[jsonKey];
+        // Safety Check: Make sure the key exists in your JSON
+        const db = (airfoilDatabase as any).default || airfoilDatabase;
+        const realCoeffs = db[jsonKey];
   
         if (!realCoeffs) {
-          console.error(`Airfoil ${airfoil} (key: ${jsonKey}) not found in database.`);
+          setTelemetry(t => ({ ...t, status: `MISSING DATA: ${jsonKey}`, color: "#F59E0B" }));
           return;
         }
   
-        // 3. Build the payload with the real geometry
         const baseWingArea = span * 2;
         const currentMat = materialLibrary[material];
         const totalWeightN = (baseWingArea * 15 + thrust * 15) * 9.81;
-  
-        const payload = {
-          alpha: aoa,
-          velocity: velocity,
-          chord_length: 2.0,
-          wing_span: span,
-          wing_area: baseWingArea,
-          material_yield_strength: currentMat.yield_strength_mpa,
-          weight_n: totalWeightN,
-          thrust_n: thrust * 1000,
-          geometry_coeffs: realCoeffs // Exactly 62 real numbers from your CSV!
-        };
   
         try {
           const response = await fetch('/api/simulate', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(payload)
+            body: JSON.stringify({
+              alpha: aoa,
+              velocity: velocity,
+              chord_length: 2.0,
+              wing_span: span,
+              wing_area: baseWingArea,
+              material_yield_strength: currentMat.yield_strength_mpa,
+              weight_n: totalWeightN,
+              thrust_n: thrust * 1000,
+              geometry_coeffs: realCoeffs
+            })
           });
   
+          if (!response.ok) {
+            const errorText = await response.text();
+            setTelemetry(t => ({ ...t, status: `SERVER ERR: ${response.status}`, color: "#EF4444" }));
+            return;
+          }
+  
           const data = await response.json();
-          
-          // Update UI state with ML results
+  
           setTelemetry(prev => ({
             ...prev,
-            cl: data.aero.Cl,
-            cd: data.aero.Cd,
-            lift: data.aero.Lift_N,
-            drag: data.aero.Drag_N,
-            fos: data.structure.FoS,
+            cl: data.aero?.Cl || 0,
+            cd: data.aero?.Cd || 0,
+            lift: data.aero?.Lift_N || 0,
+            drag: data.aero?.Drag_N || 0,
+            fos: data.structure?.FoS || 0,
             status: data.status,
-            // Calculate pretty colors based on state
             color: data.status === "FRACTURE" ? "#EF4444" : 
                    data.status === "STRESSED" ? "#F59E0B" : "#22D3EE"
           }));
   
         } catch (error) {
-          setTelemetry(t => ({ ...t, status: "API OFFLINE", color: "#EF4444" }));
+          console.error("Fetch failed:", error);
+          setTelemetry(t => ({ ...t, status: "NETWORK ERROR", color: "#EF4444" }));
         }
       };
   
       const handler = setTimeout(fetchRealPhysics, 150);
       return () => clearTimeout(handler);
-  }, [airfoil, span, aoa, velocity, material, thrust]);
+    }, [airfoil, span, aoa, velocity, material, thrust]);
+  
   
   // Derived Visualization States
   const isFractured = telemetry.fos <= 1.0 && telemetry.status !== "API CONNECTION FAILED";
