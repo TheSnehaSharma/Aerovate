@@ -1,6 +1,7 @@
 import os
 import joblib
 import numpy as np
+import onnxruntime as rt
 from functools import lru_cache
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -20,29 +21,42 @@ MODELS_DIR = os.path.join(BASE_DIR, "models")
 GLOBAL_ERROR_STATE = "Models not loaded yet"
 
 # ---------------------------------------------------------
-# Lazy Model Loader (CRITICAL for Vercel)
+# Fault-Tolerant Lazy Model Loader
 # ---------------------------------------------------------
 @lru_cache()
 def load_models():
     global GLOBAL_ERROR_STATE
-    try:
-        if not os.path.exists(MODELS_DIR):
-            raise FileNotFoundError(f"Directory not found: {MODELS_DIR}")
+    aero_model, aero_scaler = None, None
+    noise_model, noise_scaler = None, None
+    status_msgs = []
 
+    if not os.path.exists(MODELS_DIR):
+        GLOBAL_ERROR_STATE = f"Directory not found: {MODELS_DIR}"
+        print(f"❌ {GLOBAL_ERROR_STATE}")
+        return None, None, None, None
+
+    # Try loading Aero models (.pkl)
+    try:
         aero_model = joblib.load(os.path.join(MODELS_DIR, "aero_model.pkl"))
         aero_scaler = joblib.load(os.path.join(MODELS_DIR, "aero_scaler.pkl"))
-        noise_model = joblib.load(os.path.join(MODELS_DIR, "noise_model.pkl"))
-        noise_scaler = joblib.load(os.path.join(MODELS_DIR, "noise_scaler.pkl"))
-
-        GLOBAL_ERROR_STATE = "ALL SYSTEMS GO"
-        print("✅ ML models loaded successfully")
-
-        return aero_model, aero_scaler, noise_model, noise_scaler
-
+        status_msgs.append("Aero: OK")
     except Exception as e:
-        GLOBAL_ERROR_STATE = f"LOAD ERROR: {str(e)}"
-        print("❌ MODEL LOAD FAILED:", GLOBAL_ERROR_STATE)
-        return None, None, None, None
+        status_msgs.append("Aero: MISSING/ERROR")
+        print(f"⚠️ Aero model failed to load: {e}")
+
+    # Try loading Noise models (ONNX + .pkl scaler)
+    try:
+        noise_scaler = joblib.load(os.path.join(MODELS_DIR, "noise_scaler.pkl"))
+        noise_model = rt.InferenceSession(os.path.join(MODELS_DIR, "noise_model.onnx"))
+        status_msgs.append("Noise: OK (ONNX)")
+    except Exception as e:
+        status_msgs.append("Noise: MISSING/ERROR")
+        print(f"⚠️ Noise model failed to load: {e}")
+
+    GLOBAL_ERROR_STATE = " | ".join(status_msgs)
+    print(f"System State: {GLOBAL_ERROR_STATE}")
+
+    return aero_model, aero_scaler, noise_model, noise_scaler
 
 # ---------------------------------------------------------
 # FastAPI Init
@@ -107,10 +121,6 @@ async def simulate_physics(req: TelemetryRequest):
 
     aero_model, aero_scaler, noise_model, noise_scaler = load_models()
 
-    # Guard: model load failure
-    if aero_model is None or noise_model is None:
-        return zero_response(GLOBAL_ERROR_STATE)
-
     try:
         # 1. Build Feature Vector
         features = np.array([[ 
@@ -118,12 +128,14 @@ async def simulate_physics(req: TelemetryRequest):
             req.chord_length, req.thrust_n, req.weight_n
         ] + req.geometry_coeffs])
 
-        # 2. Predict Aerodynamics
-        features_scaled = aero_scaler.transform(features)
-        aero_pred = aero_model.predict(features_scaled)[0]
-        Cl, Cd = float(aero_pred[0]), float(aero_pred[1])
+        # 2. Predict Aerodynamics (Fallback to 0.0 if missing)
+        Cl, Cd = 0.0, 0.0
+        if aero_model is not None and aero_scaler is not None:
+            features_scaled = aero_scaler.transform(features)
+            aero_pred = aero_model.predict(features_scaled)[0]
+            Cl, Cd = float(aero_pred[0]), float(aero_pred[1])
 
-        # 3. Physics Calculations
+        # 3. Physics Calculations (Calculates naturally with 0s if aero failed)
         q = 0.5 * 1.225 * (req.velocity ** 2)
         Lift_N = float(q * req.wing_area * Cl)
         Drag_N = float(abs(q * req.wing_area * Cd))
@@ -137,9 +149,18 @@ async def simulate_physics(req: TelemetryRequest):
         Takeoff_Ready = bool(req.velocity > V_stall and req.thrust_n > 10000)
         Range_km = float(max(0, 1200 + (req.wing_span * 10) - (req.thrust_n / 1000 * 5) - (abs(req.alpha) * 10)))
 
-        # 4. Predict Noise
-        noise_scaled = noise_scaler.transform(features)
-        Noise_dB = float(noise_model.predict(noise_scaled)[0])
+        # 4. Predict Noise (ONNX Inference with Fallback)
+        Noise_dB = 0.0
+        if noise_model is not None and noise_scaler is not None:
+            # ONNX strictly requires float32 mapping
+            noise_scaled = noise_scaler.transform(features).astype(np.float32)
+            
+            # Extract input mapping and run
+            input_name = noise_model.get_inputs()[0].name
+            noise_pred = noise_model.run(None, {input_name: noise_scaled})[0]
+            
+            # Ravel flattens nested arrays to ensure we grab the float properly
+            Noise_dB = float(np.ravel(noise_pred)[0])
 
         # 5. Status Logic
         if FoS <= 1.0:
@@ -149,7 +170,7 @@ async def simulate_physics(req: TelemetryRequest):
         else:
             status = "OPTIMAL"
 
-        # 6. Response
+        # 6. Response (Format remains identical)
         return {
             "aero": {"Cl": Cl, "Cd": Cd, "Lift_N": Lift_N, "Drag_N": Drag_N},
             "structure": {"Stress_MPa": Stress_MPa, "FoS": FoS},
