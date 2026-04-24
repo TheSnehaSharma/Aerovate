@@ -96,18 +96,18 @@ def zero_response(status_msg):
         "status": status_msg
     }
 
-@app.get("/")
+@app.get("/api")
 def root(): 
     return {"status": GLOBAL_ERROR_STATE}
 
-@app.get("/v1/ping")
+@app.get("/api/ping")
 async def ping_server():
     return {"status": "SUCCESS", "message": "Aerovate API is online"}
 
 # ---------------------------------------------------------
 # Simulation Endpoint
 # ---------------------------------------------------------
-@app.post("/v1/simulate")
+@app.post("/api/simulate")
 async def simulate_physics(req: TelemetryRequest):
     aero_sess, aero_cfg, noise_sess, noise_cfg = load_models()
 
