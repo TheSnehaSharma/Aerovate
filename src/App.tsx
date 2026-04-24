@@ -52,7 +52,7 @@ export default function App() {
   const [sweep, setSweep] = useState<number>(15);
   const [taper, setTaper] = useState<number>(0.6);
   const [span, setSpan] = useState<number>(15);
-  const [velocity, setVelocity] = useState<number>(150);
+  const [velocity, setVelocity] = useState<number>(80);
   const [aoa, setAoa] = useState<number>(5);
   const [thrust, setThrust] = useState<number>(50); // kN
   const [material, setMaterial] = useState<Material>('Aluminum 6061-T6');
@@ -314,7 +314,7 @@ export default function App() {
   const handlePointerDown = () => {
     pressTimeoutRef.current = setTimeout(() => {
       isPointerDownRef.current = true;
-    }, 200);
+    }, 50);
   };
 
   const handlePointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
@@ -769,7 +769,7 @@ export default function App() {
           </div>
         )}
 
-        <div onClick={() => setIsSidebarOpen(false)} onPointerDown={handlePointerDown} onPointerUp={handlePointerUpOrLeave} onPointerMove={handlePointerMove} onPointerLeave={handlePointerUpOrLeave} className="flex-1 min-h-[300px] sm:min-h-0 w-full relative z-10 flex items-center justify-center pointer-events-auto shrink-0 py-8 lg:py-0 overflow-hidden cursor-crosshair">
+        <div onClick={() => setIsSidebarOpen(false)} onPointerDown={handlePointerDown} onPointerUp={handlePointerUpOrLeave} onPointerMove={handlePointerMove} onPointerLeave={handlePointerUpOrLeave} className="select-none flex-1 min-h-[300px] sm:min-h-0 w-full relative z-10 flex items-center justify-center pointer-events-auto shrink-0 py-8 lg:py-0 overflow-hidden cursor-crosshair">
           <svg viewBox="-550 -450 1100 900" preserveAspectRatio="xMidYMid meet" className={cn("w-full h-full max-w-[1600px] max-h-[1600px] transition-all duration-1000")}>
             <defs>
               <filter id="stress-glow" x="-50%" y="-50%" width="200%" height="200%">
