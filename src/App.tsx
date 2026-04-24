@@ -145,36 +145,36 @@ export default function App() {
             return;
           }
   
-          const data = await response.json();
-
-          setTelemetry(prev => ({
-            ...prev,
-            // Aero pocket
-            cl: data.aero.Cl,
-            cd: data.aero.Cd,
-            lift: data.aero.Lift_N,
-            drag: data.aero.Drag_N,
+            const data = await response.json();
+  
+            setTelemetry(prev => ({
+              ...prev,
+              // Aero pocket
+              cl: data.aero.Cl,
+              cd: data.aero.Cd,
+              lift: data.aero.Lift_N,
+              drag: data.aero.Drag_N,
+              
+              // Logic: L/D Ratio is Lift divided by Drag (or Cl/Cd)
+              ld_ratio: data.aero.Cl / Math.max(0.001, data.aero.Cd),
             
-            // Logic: L/D Ratio is Lift divided by Drag (or Cl/Cd)
-            ld_ratio: data.aero.Cl / Math.max(0.001, data.aero.Cd),
-          
-            // Structure pocket
-            stress: data.structure.Stress_MPa,
-            fos: data.structure.FoS,
-          
-            // Performance pocket (This is what was missing!)
-            v_stall: data.performance.V_stall_m_s,
-            takeoff_ready: data.performance.Takeoff_Ready,
-            range_km: data.performance.Range_km,
-          
-            // Noise pocket
-            acoustic_db: data.noise.Noise_dB,
-          
-            // Status and Color
-            status: data.status,
-            color: data.status === "FRACTURE" ? "#EF4444" : 
-                   data.status === "STRESSED" ? "#F59E0B" : "#22D3EE"
-          }));
+              // Structure pocket
+              stress: data.structure.Stress_MPa,
+              fos: data.structure.FoS,
+            
+              // Performance pocket (This is what was missing!)
+              v_stall: data.performance.V_stall_m_s,
+              takeoff_ready: data.performance.Takeoff_Ready,
+              range_km: data.performance.Range_km,
+            
+              // Noise pocket
+              acoustic_db: data.noise.Noise_dB,
+            
+              // Status and Color
+              status: data.status,
+              color: data.status === "FRACTURE" ? "#EF4444" : 
+                     data.status === "STRESSED" ? "#F59E0B" : "#22D3EE"
+            }));
   
         } catch (error) {
           console.error("Fetch failed:", error);
