@@ -47,6 +47,10 @@ interface Telemetry {
 }
 
 export default function App() {
+  useEffect(() => {
+    document.title = "Aerovate — Rapid Aero Prototyping";
+  }, []);
+
   const [airfoil, setAirfoil] = useState<Airfoil>('Clark Y');
   const [tailType, setTailType] = useState<TailType>('Conventional');
   const [sweep, setSweep] = useState<number>(15);
@@ -128,9 +132,6 @@ export default function App() {
         if (!response.ok) throw new Error("API error");
         
         const data = await response.json();
-
-        
-        console.log("✈️ Telemetry Received:", data);
 
         let uiColor = '#94A3B8'; // Slate 400
         if (data.structure.FoS <= 1.0) uiColor = '#475569'; // Slate 600
@@ -267,6 +268,7 @@ export default function App() {
           }
 
           let el = (p as any).el as SVGLineElement | null;
+          if (el && !document.contains(el)) el = null;
           if (!el) {
              el = document.getElementById(`wind-particle-${p.id}`) as unknown as SVGLineElement | null;
              (p as any).el = el;
@@ -335,6 +337,13 @@ export default function App() {
     isPointerDownRef.current = false;
     targetFlightOffset.current = { x: 0, y: 0, rot: 0 };
   };
+
+  const tipAdj = sweep > 0 ? tipOffset : 0;
+  const portWingPath = `M -20 ${rootChord/2} Q ${-20 - visualFlex} ${visualSpan/2} ${-20 + tipAdj} ${visualSpan} L ${-20 + tipAdj + tipChord} ${visualSpan} L ${rootChord/2} ${rootChord/2} Z`;
+  const portFlapPath = `M ${rootChord/2 - 10} ${rootChord/2} L ${-20 + tipAdj + tipChord - Math.max(10, tipChord*0.2)} ${visualSpan} L ${-20 + tipAdj + tipChord + visualFlapDeflection} ${visualSpan} L ${rootChord/2 + visualFlapDeflection + 10} ${rootChord/2} Z`;
+
+  const starbWingPath = `M -20 ${-rootChord/2} Q ${-20 - visualFlex} ${-visualSpan/2} ${-20 + tipAdj} ${-visualSpan} L ${-20 + tipAdj + tipChord} ${-visualSpan} L ${rootChord/2} ${-rootChord/2} Z`;
+  const starbFlapPath = `M ${rootChord/2 - 10} ${-rootChord/2} L ${-20 + tipAdj + tipChord - Math.max(10, tipChord*0.2)} ${-visualSpan} L ${-20 + tipAdj + tipChord + visualFlapDeflection} ${-visualSpan} L ${rootChord/2 + visualFlapDeflection + 10} ${-rootChord/2} Z`;
 
   return (
     <>
@@ -744,7 +753,6 @@ export default function App() {
                 {telemetry.fos.toFixed(2)}
               </span>
               <div className="flex flex-col items-end gap-0.5 sm:gap-1 mt-1 sm:mt-2 text-[7px] sm:text-[8px] uppercase tracking-widest">
-                <span className="text-[#94A3B8]">Mat: {matStyle.name}</span>
                 <span className={telemetry.takeoff_ready ? "text-zinc-300 font-bold" : "text-zinc-500 font-bold"}>
                   {telemetry.takeoff_ready ? '◆ FLIGHT READY' : '◇ INSUFFICIENT FORCE'}
                 </span>
@@ -907,48 +915,37 @@ export default function App() {
                   )}
               </g>
 
-               {(() => {
-                 const tipAdj = sweep > 0 ? tipOffset : 0;
-                 const portWing = `M -20 ${rootChord/2} Q ${-20 - visualFlex} ${visualSpan/2} ${-20 + tipAdj} ${visualSpan} L ${-20 + tipAdj + tipChord} ${visualSpan} L ${rootChord/2} ${rootChord/2} Z`;
-                 const portFlap = `M ${rootChord/2 - 10} ${rootChord/2} L ${-20 + tipAdj + tipChord - Math.max(10, tipChord*0.2)} ${visualSpan} L ${-20 + tipAdj + tipChord + visualFlapDeflection} ${visualSpan} L ${rootChord/2 + visualFlapDeflection + 10} ${rootChord/2} Z`;
+              <g stroke={matStyle.stroke} fill="rgba(96, 165, 250, 0.03)" strokeWidth="1.5" strokeDasharray={matStyle.dash} filter={matStyle.filter}>
+                <path d={portWingPath} />
+                <motion.path animate={{ d: portFlapPath }} transition={{ type: 'spring', bounce: 0.3 }} fill="rgba(96, 165, 250, 0.15)" stroke="#60A5FA" strokeDasharray="none" filter="none" />
+                
+                {(isStressed || isFractured) && (
+                  <motion.g 
+                    filter="url(#stress-glow)"
+                    animate={isFractured ? { opacity: [0.7, 1, 0.7] } : { opacity: [0.4, 0.8 + stressIntensity * 0.2, 0.4] }}
+                    transition={{ duration: isFractured ? 0.3 : Math.max(0.1, 1.2 - stressIntensity), repeat: Infinity, ease: "easeInOut" }}
+                  >
+                    <line x1="-30" y1="40" x2="30" y2="40" stroke={isFractured ? "#EF4444" : "#F59E0B"} strokeWidth={6 + (stressIntensity * 18)} strokeLinecap="round" />
+                    <line x1="-30" y1="-40" x2="30" y2="-40" stroke={isFractured ? "#EF4444" : "#F59E0B"} strokeWidth={6 + (stressIntensity * 18)} strokeLinecap="round" />
+                    {isFractured && <circle cx="0" cy="40" r="40" fill="#EF4444" opacity="0.6" />}
+                    {isFractured && <circle cx="0" cy="-40" r="40" fill="#EF4444" opacity="0.6" />}
+                  </motion.g>
+                )}
 
-                 const starbWing = `M -20 ${-rootChord/2} Q ${-20 - visualFlex} ${-visualSpan/2} ${-20 + tipAdj} ${-visualSpan} L ${-20 + tipAdj + tipChord} ${-visualSpan} L ${rootChord/2} ${-rootChord/2} Z`;
-                 const starbFlap = `M ${rootChord/2 - 10} ${-rootChord/2} L ${-20 + tipAdj + tipChord - Math.max(10, tipChord*0.2)} ${-visualSpan} L ${-20 + tipAdj + tipChord + visualFlapDeflection} ${-visualSpan} L ${rootChord/2 + visualFlapDeflection + 10} ${-rootChord/2} Z`;
-
-                 return (
-                   <g stroke={matStyle.stroke} fill="rgba(96, 165, 250, 0.03)" strokeWidth="1.5" strokeDasharray={matStyle.dash} filter={matStyle.filter}>
-                     <path d={portWing} />
-                     <motion.path animate={{ d: portFlap }} transition={{ type: 'spring', bounce: 0.3 }} fill="rgba(96, 165, 250, 0.15)" stroke="#60A5FA" strokeDasharray="none" filter="none" />
-                     
-                     {(isStressed || isFractured) && (
-                       <motion.g 
-                         filter="url(#stress-glow)"
-                         animate={isFractured ? { opacity: [0.7, 1, 0.7] } : { opacity: [0.4, 0.8 + stressIntensity * 0.2, 0.4] }}
-                         transition={{ duration: isFractured ? 0.3 : Math.max(0.1, 1.2 - stressIntensity), repeat: Infinity, ease: "easeInOut" }}
-                       >
-                         <line x1="-30" y1="40" x2="30" y2="40" stroke={isFractured ? "#EF4444" : "#F59E0B"} strokeWidth={6 + (stressIntensity * 18)} strokeLinecap="round" />
-                         <line x1="-30" y1="-40" x2="30" y2="-40" stroke={isFractured ? "#EF4444" : "#F59E0B"} strokeWidth={6 + (stressIntensity * 18)} strokeLinecap="round" />
-                         {isFractured && <circle cx="0" cy="40" r="40" fill="#EF4444" opacity="0.6" />}
-                         {isFractured && <circle cx="0" cy="-40" r="40" fill="#EF4444" opacity="0.6" />}
-                       </motion.g>
-                     )}
-
-                     <g style={{
-                        transform: isFractured ? 'translate(40px, -80px) rotate(-15deg)' : 'none',
-                        transformOrigin: '0px -40px',
-                        transition: isFractured ? 'transform 0.5s cubic-bezier(0.8, 0, 0.2, 1)' : 'transform 0.2s ease-out'
-                     }}>
-                       <path d={starbWing} />
-                       <motion.path animate={{ d: starbFlap }} transition={{ type: "spring", bounce: 0.3 }} fill="rgba(96, 165, 250, 0.15)" stroke="#60A5FA" strokeDasharray="none" filter="none" />
-                       
-                       {isFractured && (
-                          <path d="M -40 -40 L -25 -55 L -5 -35 L 20 -50 L 40 -40" stroke="#EF4444" strokeWidth="3" fill="none" filter="url(#stress-glow)" strokeDasharray="none"/>
-                       )}
-                     </g>
-                   </g>
-                 );
-               })()}
+                <g style={{
+                  transform: isFractured ? 'translate(40px, -80px) rotate(-15deg)' : 'none',
+                  transformOrigin: '0px -40px',
+                  transition: isFractured ? 'transform 0.5s cubic-bezier(0.8, 0, 0.2, 1)' : 'transform 0.2s ease-out'
+                }}>
+                  <path d={starbWingPath} />
+                  <motion.path animate={{ d: starbFlapPath }} transition={{ type: "spring", bounce: 0.3 }} fill="rgba(96, 165, 250, 0.15)" stroke="#60A5FA" strokeDasharray="none" filter="none" />
+                  
+                  {isFractured && (
+                    <path d="M -40 -40 L -25 -55 L -5 -35 L 20 -50 L 40 -40" stroke="#EF4444" strokeWidth="3" fill="none" filter="url(#stress-glow)" strokeDasharray="none"/>
+                  )}
+                </g>
               </g>
+            </g>
             </g>
           </svg>
         </div>
@@ -956,8 +953,8 @@ export default function App() {
         {/* Footer Aero Deck */}
         <div className="p-3 sm:p-6 z-20 flex justify-between items-end pointer-events-none gap-2 shrink-0 relative mt-auto w-full">
            <div className="flex flex-wrap gap-1.5 sm:gap-2 pointer-events-auto shrink-0 self-end">
-             <AeroDeckGauge title="Acoustic Sig" value={telemetry.acoustic_db.toFixed(1)} unit="dB" max={140} color="#94A3B8" />
-             <AeroDeckGauge title="L/D Ratio" value={telemetry.ld_ratio.toFixed(1)} unit="R" max={30} color={aoa > 5 ? '#64748B' : '#94A3B8'} />
+             <AeroDeckGauge title="Acoustic Sig" value={telemetry.acoustic_db.toFixed(1)} unit="dB" max={140} color={telemetry.acoustic_db > 110 ? '#CBD5E1' : telemetry.acoustic_db > 85 ? '#94A3B8' : '#64748B'} />
+             <AeroDeckGauge title="L/D Ratio" value={telemetry.ld_ratio.toFixed(1)} unit="R" max={30} color={telemetry.ld_ratio < 8 ? '#CBD5E1' : telemetry.ld_ratio < 15 ? '#94A3B8' : '#64748B'} />
            </div>
 
            <div className="sm:hidden flex flex-col gap-2 pointer-events-auto shrink-0 justify-end w-[180px] ml-auto pb-1 relative">
@@ -993,7 +990,7 @@ export default function App() {
 
 // -- Reusable UI Components
 
-function ControlSelect({ label, value, options, onChange }: { label: string, value: string, options: string[], onChange: (v: string) => void }) {
+const ControlSelect = React.memo(function ControlSelect({ label, value, options, onChange }: { label: string, value: string, options: string[], onChange: (v: string) => void }) {
   return (
     <div className="space-y-1.5 focus-within:ring-1 ring-zinc-500/50 rounded transition-all">
       <label className="text-[10px] uppercase font-semibold tracking-wider text-zinc-400">{label}</label>
@@ -1009,9 +1006,9 @@ function ControlSelect({ label, value, options, onChange }: { label: string, val
       </div>
     </div>
   );
-}
+});
 
-function ControlSlider({ label, value, min, max, step = 1, onChange }: { label: string, value: number, min: number, max: number, step?: number, onChange: (v: number) => void }) {
+const ControlSlider = React.memo(function ControlSlider({ label, value, min, max, step = 1, onChange }: { label: string, value: number, min: number, max: number, step?: number, onChange: (v: number) => void }) {
   return (
     <div className="space-y-2">
       <div className="flex justify-between text-[10px] font-semibold tracking-wider uppercase">
@@ -1031,18 +1028,18 @@ function ControlSlider({ label, value, min, max, step = 1, onChange }: { label: 
       </div>
     </div>
   );
-}
+});
 
-function HudMetricCard({ label, value, highlight }: { label: string, value: string, highlight?: boolean }) {
+const HudMetricCard = React.memo(function HudMetricCard({ label, value, highlight }: { label: string, value: string, highlight?: boolean }) {
   return (
     <div className={cn("bg-[#05131A]/80 backdrop-blur-md border px-2 py-1.5 sm:px-3 sm:py-1.5 rounded shadow-lg transition-colors w-full", highlight ? "border-amber-500/50" : "border-[#0F2836]")}>
       <div className={cn("text-[6px] sm:text-[7px] uppercase tracking-widest mb-0.5 sm:mb-1 whitespace-nowrap", highlight ? "text-amber-500" : "text-zinc-500")}>{label}</div>
       <div className={cn("text-sm sm:text-base font-mono leading-none", highlight ? "text-amber-100" : "text-zinc-400")}>{value}</div>
     </div>
   );
-}
+});
 
-function AeroDeckGauge({ title, value, unit, max, color }: { title: string, value: string, unit: string, max: number, color: string }) {
+const AeroDeckGauge = React.memo(function AeroDeckGauge({ title, value, unit, max, color }: { title: string, value: string, unit: string, max: number, color: string }) {
   const percentage = Math.min(100, Math.max(0, (Number(value) / max) * 100));
   return (
     <div className="bg-[#05131A]/80 backdrop-blur-md border border-[#0F2836] px-2 py-1.5 sm:px-3 sm:py-2 rounded flex flex-col min-w-[75px] sm:min-w-[90px] shadow-lg">
@@ -1056,7 +1053,7 @@ function AeroDeckGauge({ title, value, unit, max, color }: { title: string, valu
       </div>
     </div>
   );
-}
+});
 
 const VnEnvelopeGraph = React.memo(({ velocity, lift, weight, wingArea, wingSpan, yieldStrength }: { velocity: number, lift: number, weight: number, wingArea: number, wingSpan: number, yieldStrength: number }) => {
   const structural_constant = 5000;
