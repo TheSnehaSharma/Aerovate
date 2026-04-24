@@ -4,4 +4,3 @@ pydantic
 joblib
 numpy
 scikit-learn
-xgboost==1.7.6
