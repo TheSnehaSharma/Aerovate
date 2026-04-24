@@ -107,9 +107,10 @@ export default function App() {
   // =======================================================================
   useEffect(() => {
       const fetchRealPhysics = async () => {
+        // 1. Map the UI selection to the JSON key (e.g. 'Clark Y' -> 'clarky')
         const jsonKey = AIRFOIL_MAP[airfoil];
         
-        // Safety Check: Make sure the key exists in your JSON
+        // 2. Safety Check: Extract coefficients from your JSON database
         const db = (airfoilDatabase as any).default || airfoilDatabase;
         const realCoeffs = db[jsonKey];
   
@@ -118,11 +119,13 @@ export default function App() {
           return;
         }
   
+        // 3. Prepare Physics Constants
         const baseWingArea = span * 2;
         const currentMat = materialLibrary[material];
         const totalWeightN = (baseWingArea * 15 + thrust * 15) * 9.81;
   
         try {
+          // 4. Send the POST request to your FastAPI backend
           const response = await fetch('/api/simulate', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -140,41 +143,48 @@ export default function App() {
           });
   
           if (!response.ok) {
-            const errorText = await response.text();
             setTelemetry(t => ({ ...t, status: `SERVER ERR: ${response.status}`, color: "#EF4444" }));
             return;
           }
   
-            const data = await response.json();
+          const data = await response.json();
+          
+          // DEBUG: Open F12 > Console to see this log!
+          console.log("✈️ Telemetry Received:", data);
   
-            setTelemetry(prev => ({
-              ...prev,
-              // Aero pocket
-              cl: data.aero.Cl,
-              cd: data.aero.Cd,
-              lift: data.aero.Lift_N,
-              drag: data.aero.Drag_N,
-              
-              // Logic: L/D Ratio is Lift divided by Drag (or Cl/Cd)
-              ld_ratio: data.aero.Cl / Math.max(0.001, data.aero.Cd),
+          // 5. MAP DATA TO STATE (Matching your index.py keys exactly)
+          setTelemetry(prev => ({
+            ...prev,
+            // Aero Data
+            cl: data.aero?.Cl ?? 0,
+            cd: data.aero?.Cd ?? 0,
+            lift: data.aero?.Lift_N ?? 0,
+            drag: data.aero?.Drag_N ?? 0,
             
-              // Structure pocket
-              stress: data.structure.Stress_MPa,
-              fos: data.structure.FoS,
-            
-              // Performance pocket (This is what was missing!)
-              v_stall: data.performance.V_stall_m_s,
-              takeoff_ready: data.performance.Takeoff_Ready,
-              range_km: data.performance.Range_km,
-            
-              // Noise pocket
-              acoustic_db: data.noise.Noise_dB,
-            
-              // Status and Color
-              status: data.status,
-              color: data.status === "FRACTURE" ? "#EF4444" : 
-                     data.status === "STRESSED" ? "#F59E0B" : "#22D3EE"
-            }));
+            // L/D Ratio (Calculated from results)
+            ld_ratio: (data.aero?.Cl / Math.max(0.001, data.aero?.Cd)) || 0,
+  
+            // Structural Data
+            stress: data.structure?.Stress_MPa ?? 0,
+            fos: data.structure?.FoS ?? 0,
+  
+            // Performance Data (V-Stall and Range)
+            v_stall: data.performance?.V_stall_m_s ?? 0,
+            takeoff_ready: data.performance?.Takeoff_Ready ?? false,
+            range_km: data.performance?.Range_km ?? 0,
+  
+            // Noise Data
+            acoustic_db: data.noise?.Noise_dB ?? 0,
+  
+            // Global UI Status
+            status: data.status,
+            color: data.status === "FRACTURE" ? "#EF4444" : 
+                   data.status === "STRESSED" ? "#F59E0B" : "#22D3EE",
+  
+            // Pass material constants back to UI for the graphs
+            yield_strength_mpa: currentMat.yield_strength_mpa,
+            weight_n: totalWeightN
+          }));
   
         } catch (error) {
           console.error("Fetch failed:", error);
@@ -182,8 +192,10 @@ export default function App() {
         }
       };
   
+      // Debounce the API calls to prevent overloading the server while sliding
       const handler = setTimeout(fetchRealPhysics, 150);
       return () => clearTimeout(handler);
+      
     }, [airfoil, span, aoa, velocity, material, thrust]);
   
   
