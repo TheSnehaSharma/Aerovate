@@ -71,6 +71,8 @@ export default function App() {
   const planeRef = useRef<SVGGElement>(null);
   const fanPortRef = useRef<SVGGElement>(null);
   const fanStarbRef = useRef<SVGGElement>(null);
+  const targetFlightOffset = useRef({ x: 0, y: 0, rot: 0 });
+  const currentFlightOffset = useRef({ x: 0, y: 0, rot: 0 });
   const getMaterialStyle = () => {
     switch(material) {
       case 'Carbon Fiber': return { stroke: '#0F2836', dash: '3 2', filter: 'none', flexMult: 0.01, name: 'Carbon' };
@@ -210,15 +212,21 @@ export default function App() {
     const loop = (time: number) => {
       
       if (planeRef.current) {
+        currentFlightOffset.current.x += (targetFlightOffset.current.x - currentFlightOffset.current.x) * 0.05;
+        currentFlightOffset.current.y += (targetFlightOffset.current.y - currentFlightOffset.current.y) * 0.05;
+        currentFlightOffset.current.rot += (targetFlightOffset.current.rot - currentFlightOffset.current.rot) * 0.05;
+
+        let tx = currentFlightOffset.current.x;
+        let ty = currentFlightOffset.current.y;
+
         if (isStressed) {
           const intensity = (1.5 - telemetry.fos) / 0.5; 
           const maxShake = 6 * Math.pow(intensity, 2); 
-          const dx = (Math.random() - 0.5) * maxShake;
-          const dy = (Math.random() - 0.5) * maxShake;
-          planeRef.current.style.transform = `translate(${dx}px, ${dy}px)`;
-        } else {
-          planeRef.current.style.transform = `translate(0px, 0px)`;
+          tx += (Math.random() - 0.5) * maxShake;
+          ty += (Math.random() - 0.5) * maxShake;
         }
+        
+        planeRef.current.style.transform = `translate(${tx}px, ${ty}px) rotate(${currentFlightOffset.current.rot}deg)`;
       }
 
       
@@ -299,6 +307,34 @@ export default function App() {
   const rootChord = 80 + (sweep * 0.5); 
   const tipChord = rootChord * taper;
   const tipOffset = visualSpan * Math.tan((sweep * Math.PI) / 180);
+
+  const isPointerDownRef = useRef(false);
+  const pressTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
+  const handlePointerDown = () => {
+    pressTimeoutRef.current = setTimeout(() => {
+      isPointerDownRef.current = true;
+    }, 200);
+  };
+
+  const handlePointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (!isPointerDownRef.current) return;
+    const rect = e.currentTarget.getBoundingClientRect();
+    const centerX = rect.width / 2;
+    const centerY = rect.height / 2;
+    const mx = e.clientX - rect.left - centerX;
+    const my = e.clientY - rect.top - centerY;
+    
+    targetFlightOffset.current.rot = (-my / centerY) * 25; 
+    targetFlightOffset.current.y = (my / centerY) * 60; 
+    targetFlightOffset.current.x = (mx / centerX) * 60;
+  };
+
+  const handlePointerUpOrLeave = () => {
+    if (pressTimeoutRef.current) clearTimeout(pressTimeoutRef.current);
+    isPointerDownRef.current = false;
+    targetFlightOffset.current = { x: 0, y: 0, rot: 0 };
+  };
 
   return (
     <>
@@ -733,7 +769,7 @@ export default function App() {
           </div>
         )}
 
-        <div onClick={() => setIsSidebarOpen(false)} className="flex-1 min-h-[300px] sm:min-h-0 w-full relative z-10 flex items-center justify-center pointer-events-auto shrink-0 py-8 lg:py-0 overflow-hidden cursor-crosshair">
+        <div onClick={() => setIsSidebarOpen(false)} onPointerDown={handlePointerDown} onPointerUp={handlePointerUpOrLeave} onPointerMove={handlePointerMove} onPointerLeave={handlePointerUpOrLeave} className="flex-1 min-h-[300px] sm:min-h-0 w-full relative z-10 flex items-center justify-center pointer-events-auto shrink-0 py-8 lg:py-0 overflow-hidden cursor-crosshair">
           <svg viewBox="-550 -450 1100 900" preserveAspectRatio="xMidYMid meet" className={cn("w-full h-full max-w-[1600px] max-h-[1600px] transition-all duration-1000")}>
             <defs>
               <filter id="stress-glow" x="-50%" y="-50%" width="200%" height="200%">
