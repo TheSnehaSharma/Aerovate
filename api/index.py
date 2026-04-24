@@ -1,5 +1,5 @@
 import os
-import joblib
+import json
 import numpy as np
 import onnxruntime as rt
 from functools import lru_cache
@@ -9,59 +9,62 @@ from pydantic import BaseModel
 from typing import List
 
 # ---------------------------------------------------------
-# 1. OS Pathing
+# OS Pathing & Global State
 # ---------------------------------------------------------
 CURRENT_FILE = os.path.abspath(__file__)
 BASE_DIR = os.path.dirname(CURRENT_FILE)
 MODELS_DIR = os.path.join(BASE_DIR, "models")
 
-# ---------------------------------------------------------
-# Global Model Handles & Error Tracking
-# ---------------------------------------------------------
-GLOBAL_ERROR_STATE = "Models not loaded yet"
+GLOBAL_ERROR_STATE = "Initializing..."
 
 # ---------------------------------------------------------
-# Fault-Tolerant Lazy Model Loader
+# All-ONNX Lazy Loader (ZERO Scikit-Learn required)
 # ---------------------------------------------------------
 @lru_cache()
 def load_models():
     global GLOBAL_ERROR_STATE
-    aero_model, aero_scaler = None, None
-    noise_model, noise_scaler = None, None
+    aero_sess, noise_sess = None, None
+    aero_cfg, noise_cfg = None, None
     status_msgs = []
 
     if not os.path.exists(MODELS_DIR):
         GLOBAL_ERROR_STATE = f"Directory not found: {MODELS_DIR}"
-        print(f"❌ {GLOBAL_ERROR_STATE}")
         return None, None, None, None
 
-    # Try loading Aero models (.pkl)
+    # Helper to load JSON scaler configs
+    def load_json(filename):
+        path = os.path.join(MODELS_DIR, filename)
+        if os.path.exists(path):
+            with open(path, 'r') as f: 
+                return json.load(f)
+        return None
+
+    # Try loading Aero files
     try:
-        aero_model = joblib.load(os.path.join(MODELS_DIR, "aero_model.pkl"))
-        aero_scaler = joblib.load(os.path.join(MODELS_DIR, "aero_scaler.pkl"))
+        aero_sess = rt.InferenceSession(os.path.join(MODELS_DIR, "aero_model.onnx"))
+        aero_cfg = load_json("aero_scaler.json")
         status_msgs.append("Aero: OK")
     except Exception as e:
-        status_msgs.append("Aero: MISSING/ERROR")
-        print(f"⚠️ Aero model failed to load: {e}")
+        status_msgs.append("Aero: ERROR")
+        print(f"⚠️ Aero load failed: {e}")
 
-    # Try loading Noise models (ONNX + .pkl scaler)
+    # Try loading Noise files
     try:
-        noise_scaler = joblib.load(os.path.join(MODELS_DIR, "noise_scaler.pkl"))
-        noise_model = rt.InferenceSession(os.path.join(MODELS_DIR, "noise_model.onnx"))
-        status_msgs.append("Noise: OK (ONNX)")
+        noise_sess = rt.InferenceSession(os.path.join(MODELS_DIR, "noise_model.onnx"))
+        noise_cfg = load_json("noise_scaler.json")
+        status_msgs.append("Noise: OK")
     except Exception as e:
-        status_msgs.append("Noise: MISSING/ERROR")
-        print(f"⚠️ Noise model failed to load: {e}")
+        status_msgs.append("Noise: ERROR")
+        print(f"⚠️ Noise load failed: {e}")
 
     GLOBAL_ERROR_STATE = " | ".join(status_msgs)
     print(f"System State: {GLOBAL_ERROR_STATE}")
-
-    return aero_model, aero_scaler, noise_model, noise_scaler
+    return aero_sess, aero_cfg, noise_sess, noise_cfg
 
 # ---------------------------------------------------------
 # FastAPI Init
 # ---------------------------------------------------------
-app = FastAPI(title="Aerovate ML Backend")
+app = FastAPI(title="Aerovate ML Backend (ONNX Edition)")
 
 app.add_middleware(
     CORSMiddleware,
@@ -71,14 +74,7 @@ app.add_middleware(
 )
 
 # ---------------------------------------------------------
-# Debug Root Endpoint
-# ---------------------------------------------------------
-@app.get("/")
-def root():
-    return {"status": GLOBAL_ERROR_STATE}
-
-# ---------------------------------------------------------
-# Request Schema
+# Schemas & Fallbacks
 # ---------------------------------------------------------
 class TelemetryRequest(BaseModel):
     alpha: float
@@ -91,9 +87,6 @@ class TelemetryRequest(BaseModel):
     thrust_n: float
     geometry_coeffs: List[float]
 
-# ---------------------------------------------------------
-# Safe Fallback Response
-# ---------------------------------------------------------
 def zero_response(status_msg):
     return {
         "aero": {"Cl": 0.0, "Cd": 0.0, "Lift_N": 0.0, "Drag_N": 0.0},
@@ -103,39 +96,40 @@ def zero_response(status_msg):
         "status": status_msg
     }
 
-# ---------------------------------------------------------
-# Health Check
-# ---------------------------------------------------------
+@app.get("/")
+def root(): 
+    return {"status": GLOBAL_ERROR_STATE}
+
 @app.get("/v1/ping")
 async def ping_server():
-    return {
-        "status": "SUCCESS",
-        "message": "FastAPI on Vercel is working"
-    }
+    return {"status": "SUCCESS", "message": "Aerovate API is online"}
 
 # ---------------------------------------------------------
 # Simulation Endpoint
 # ---------------------------------------------------------
 @app.post("/v1/simulate")
 async def simulate_physics(req: TelemetryRequest):
-
-    aero_model, aero_scaler, noise_model, noise_scaler = load_models()
+    aero_sess, aero_cfg, noise_sess, noise_cfg = load_models()
 
     try:
-        # 1. Build Feature Vector
+        # 1. Build Feature Vector (ONNX strictly requires float32)
         features = np.array([[ 
             req.alpha, req.velocity, req.wing_area, req.wing_span,
             req.chord_length, req.thrust_n, req.weight_n
-        ] + req.geometry_coeffs])
+        ] + req.geometry_coeffs], dtype=np.float32)
 
-        # 2. Predict Aerodynamics (Fallback to 0.0 if missing)
+        # 2. Predict Aerodynamics (Manual Z-Score Scaling: (x - mean) / scale)
         Cl, Cd = 0.0, 0.0
-        if aero_model is not None and aero_scaler is not None:
-            features_scaled = aero_scaler.transform(features)
-            aero_pred = aero_model.predict(features_scaled)[0]
-            Cl, Cd = float(aero_pred[0]), float(aero_pred[1])
+        if aero_sess and aero_cfg:
+            means = np.array(aero_cfg['mean'], dtype=np.float32)
+            scales = np.array(aero_cfg['scale'], dtype=np.float32)
+            scaled_features = (features - means) / scales
+            
+            input_name = aero_sess.get_inputs()[0].name
+            aero_pred = aero_sess.run(None, {input_name: scaled_features})[0]
+            Cl, Cd = float(aero_pred[0][0]), float(aero_pred[0][1])
 
-        # 3. Physics Calculations (Calculates naturally with 0s if aero failed)
+        # 3. Physics Calculations 
         q = 0.5 * 1.225 * (req.velocity ** 2)
         Lift_N = float(q * req.wing_area * Cl)
         Drag_N = float(abs(q * req.wing_area * Cd))
@@ -149,28 +143,26 @@ async def simulate_physics(req: TelemetryRequest):
         Takeoff_Ready = bool(req.velocity > V_stall and req.thrust_n > 10000)
         Range_km = float(max(0, 1200 + (req.wing_span * 10) - (req.thrust_n / 1000 * 5) - (abs(req.alpha) * 10)))
 
-        # 4. Predict Noise (ONNX Inference with Fallback)
+        # 4. Predict Noise (Manual Scaling)
         Noise_dB = 0.0
-        if noise_model is not None and noise_scaler is not None:
-            # ONNX strictly requires float32 mapping
-            noise_scaled = noise_scaler.transform(features).astype(np.float32)
+        if noise_sess and noise_cfg:
+            means = np.array(noise_cfg['mean'], dtype=np.float32)
+            scales = np.array(noise_cfg['scale'], dtype=np.float32)
+            scaled_features = (features - means) / scales
             
-            # Extract input mapping and run
-            input_name = noise_model.get_inputs()[0].name
-            noise_pred = noise_model.run(None, {input_name: noise_scaled})[0]
-            
-            # Ravel flattens nested arrays to ensure we grab the float properly
+            input_name = noise_sess.get_inputs()[0].name
+            noise_pred = noise_sess.run(None, {input_name: scaled_features})[0]
             Noise_dB = float(np.ravel(noise_pred)[0])
 
         # 5. Status Logic
-        if FoS <= 1.0:
+        if FoS <= 1.0: 
             status = "FRACTURE"
-        elif FoS <= 1.5:
+        elif FoS <= 1.5: 
             status = "STRESSED"
-        else:
+        else: 
             status = "OPTIMAL"
 
-        # 6. Response (Format remains identical)
+        # 6. JSON Response
         return {
             "aero": {"Cl": Cl, "Cd": Cd, "Lift_N": Lift_N, "Drag_N": Drag_N},
             "structure": {"Stress_MPa": Stress_MPa, "FoS": FoS},
