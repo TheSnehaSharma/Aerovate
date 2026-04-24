@@ -117,13 +117,19 @@ export default function App() {
           geometry_coeffs: Array(62).fill(0.01)
         };
         
-        const response = await fetch('/api/v1/simulate', {
+        const response = await fetch('/api/simulate', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 
+            'Content-Type': 'application/json',
+            'Accept': 'application/json'
+          },
           body: JSON.stringify(payload)
         });
         
-        if (!response.ok) throw new Error("API error");
+        if (!response.ok) {
+            const errorText = await response.text();
+            throw new Error(`API error: ${response.status} - ${errorText}`);
+        }
         
         const data = await response.json();
 
