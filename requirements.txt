@@ -1,6 +1,6 @@
 fastapi
-uvicorn
 pydantic
 joblib
 numpy
 scikit-learn
+onnxruntime
