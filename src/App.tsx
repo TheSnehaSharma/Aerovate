@@ -6,6 +6,7 @@ import clsx from 'clsx';
 import { twMerge } from 'tailwind-merge';
 
 import materialLibrary from './material_library.json';
+import airfoilDatabase from './airfoil_database.json';
 
 function cn(...inputs: (string | undefined | null | false)[]) {
   return twMerge(clsx(inputs));
@@ -97,92 +98,58 @@ export default function App() {
   // LIVE API CONNECTION (Strict ML Data Only)
   // =======================================================================
   useEffect(() => {
-    const fetchRealPhysics = async () => {
-      const baseWingArea = span * 2; 
-      const currentMat = materialLibrary[material as keyof typeof materialLibrary];
-      const structuralWeight = (baseWingArea * 0.1) * currentMat.density_kg_m3;
-      const engineWeightEstimate = thrust * 15; 
-      const totalWeightN = (structuralWeight + engineWeightEstimate) * 9.81;
-
-      try {
-        const payload = {
-          alpha: aoa,
-          velocity: velocity,
-          chord_length: 2.0,
-          wing_span: span,
-          wing_area: baseWingArea,
-          material_yield_strength: currentMat.yield_strength_mpa,
-          weight_n: totalWeightN,
-          thrust_n: thrust * 1000,
-          geometry_coeffs: Array(62).fill(0.01)
-        };
-        
-        const response = await fetch('/api/simulate', {
-          method: 'POST',
-          headers: { 
-            'Content-Type': 'application/json',
-            'Accept': 'application/json'
-          },
-          body: JSON.stringify(payload)
-        });
-        
-        if (!response.ok) {
-            const errorText = await response.text();
-            throw new Error(`API error: ${response.status} - ${errorText}`);
+      const fetchRealPhysics = async () => {
+        // 1. Get real coefficients from the JSON database
+        // If the selected name isn't found, fallback to the first one available
+        const airfoilName = airfoil; 
+        const realCoeffs = airfoilDatabase[airfoilName] || Object.values(airfoilDatabase)[0];
+  
+        // 2. Calculate dynamic weights based on UI
+        const baseWingArea = span * 2;
+        const currentMat = materialLibrary[material];
+        const totalWeightN = (baseWingArea * 15 + thrust * 15) * 9.81;
+  
+        try {
+          const payload = {
+            alpha: aoa,
+            velocity: velocity,
+            chord_length: 2.0,
+            wing_span: span,
+            wing_area: baseWingArea,
+            material_yield_strength: currentMat.yield_strength_mpa,
+            weight_n: totalWeightN,
+            thrust_n: thrust * 1000,
+            geometry_coeffs: realCoeffs // This is now exactly 62 real numbers
+          };
+  
+          const response = await fetch('/api/simulate', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+          });
+  
+          const data = await response.json();
+          
+          // Update your telemetry state with the data.aero.Cl, etc.
+          setTelemetry(prev => ({
+            ...prev,
+            cl: data.aero.Cl,
+            cd: data.aero.Cd,
+            lift: data.aero.Lift_N,
+            fos: data.structure.FoS,
+            status: data.status,
+            // ... map other fields
+          }));
+  
+        } catch (error) {
+          console.error("Simulation failed", error);
         }
-        
-        const data = await response.json();
-
-        let uiColor = '#22D3EE'; // Cyan
-        if (data.structure.FoS <= 1.0) uiColor = '#EF4444'; // Red
-        else if (velocity <= data.performance.V_stall_m_s) uiColor = '#94A3B8'; // Slate
-        else if (data.structure.FoS <= 1.5) uiColor = '#F59E0B'; // Orange
-
-        // Update React State strictly from ML API
-        setTelemetry({
-          cl: data.aero.Cl,
-          cd: data.aero.Cd,
-          lift: data.aero.Lift_N,
-          drag: data.aero.Drag_N,
-          stress: data.structure.Stress_MPa * 1e6,
-          fos: data.structure.FoS,
-          n: data.aero.Lift_N / totalWeightN,
-          acoustic_db: data.noise.Noise_dB,
-          ld_ratio: data.aero.Lift_N / Math.max(1, data.aero.Drag_N),
-          v_stall: data.performance.V_stall_m_s,
-          takeoff_ready: data.performance.Takeoff_Ready,
-          range_km: data.performance.Range_km,
-          weight_fraction: structuralWeight / (structuralWeight + engineWeightEstimate),
-          structural_weight: structuralWeight,
-          status: data.status,
-          color: uiColor,
-          weight_n: totalWeightN,
-          yield_strength_mpa: currentMat.yield_strength_mpa
-        });
-
-      } catch (error) {
-        console.error(`[Error] ML Backend API unreachable. Reason:`, (error as Error).message);
-        
-        // Strict Hard Failure - zero out all ML metrics if the backend drops
-        setTelemetry(prev => ({ 
-          ...prev, 
-          cl: 0, cd: 0, lift: 0, drag: 0, stress: 0, fos: 0, n: 0,
-          acoustic_db: 0, ld_ratio: 0, v_stall: 0, range_km: 0, takeoff_ready: false,
-          status: "API CONNECTION FAILED", 
-          color: "#EF4444", // Red alert
-          weight_n: totalWeightN,
-          yield_strength_mpa: currentMat.yield_strength_mpa
-        }));
-      }
-    };
-
-    const handler = setTimeout(() => {
-      fetchRealPhysics();
-    }, 150); // 150ms debounce
-
-    return () => clearTimeout(handler);
-  }, [span, airfoil, aoa, sweep, velocity, material, thrust]);
-
+      };
+  
+      const handler = setTimeout(fetchRealPhysics, 150);
+      return () => clearTimeout(handler);
+  }, [span, airfoil, aoa, velocity, material, thrust]);
+  
   // Derived Visualization States
   const isFractured = telemetry.fos <= 1.0 && telemetry.status !== "API CONNECTION FAILED";
   const isStressed = telemetry.fos <= 1.5 && telemetry.fos > 1.0;
