@@ -1,18 +1,7 @@
 {
-  "builds": [
-    {
-      "src": "index.py",
-      "use": "@vercel/python"
-    },
-    {
-      "src": "package.json",
-      "use": "@vercel/static-build"
+  "functions": {
+    "api/index.py": {
+      "runtime": "python3.11"
     }
-  ],
-  "rewrites": [
-    {
-      "source": "/api/(.*)",
-      "destination": "/index.py"
-    }
-  ]
+  }
 }
