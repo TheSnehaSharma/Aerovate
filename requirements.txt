@@ -1,6 +1,4 @@
 fastapi
 pydantic
-joblib
 numpy
-scikit-learn
 onnxruntime
