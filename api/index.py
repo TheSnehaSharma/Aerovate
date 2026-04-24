@@ -66,11 +66,23 @@ async def simulate(req: TelemetryRequest):
         FoS = min(10.0, req.material_yield_strength / max(1.0, Stress_MPa))
         V_stall = np.sqrt(req.weight_n / (0.5 * 1.225 * req.wing_area * 1.5))
 
-        return {
-            "aero": {"Cl": Cl, "Cd": Cd, "Lift_N": Lift_N, "Drag_N": Drag_N},
-            "structure": {"Stress_MPa": Stress_MPa, "FoS": FoS},
-            "performance": {"V_stall_m_s": V_stall, "Takeoff_Ready": req.velocity > V_stall, "Range_km": 1200},
-            "noise": {"Noise_dB": 75.0}, # Placeholder or use noise_sess logic
+       return {
+            "aero": {
+                "Cl": float(Cl), 
+                "Cd": float(Cd), 
+                "Lift_N": float(Lift_N), 
+                "Drag_N": float(Drag_N)
+            },
+            "structure": {
+                "Stress_MPa": float(Stress_MPa), 
+                "FoS": float(FoS)
+            },
+            "performance": {
+                "V_stall_m_s": V_stall, 
+                "Takeoff_Ready": takeoff_ready, 
+                "Range_km": 1200
+            },
+            "noise": {"Noise_dB": 75.0},
             "status": "OPTIMAL" if FoS > 1.5 else "STRESSED"
         }
     except Exception as e:
