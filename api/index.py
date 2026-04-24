@@ -1,7 +1,7 @@
 import os
-import uvicorn
 import joblib
 import numpy as np
+from functools import lru_cache
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -17,31 +17,32 @@ MODELS_DIR = os.path.join(BASE_DIR, "models")
 # ---------------------------------------------------------
 # Global Model Handles & Error Tracking
 # ---------------------------------------------------------
-aero_model = None
-aero_scaler = None
-noise_model = None
-noise_scaler = None
-GLOBAL_ERROR_STATE = "Models are booting..."
+GLOBAL_ERROR_STATE = "Models not loaded yet"
 
+# ---------------------------------------------------------
+# Lazy Model Loader (CRITICAL for Vercel)
+# ---------------------------------------------------------
+@lru_cache()
 def load_models():
-    global aero_model, aero_scaler, noise_model, noise_scaler, GLOBAL_ERROR_STATE
+    global GLOBAL_ERROR_STATE
     try:
         if not os.path.exists(MODELS_DIR):
             raise FileNotFoundError(f"Directory not found: {MODELS_DIR}")
-            
+
         aero_model = joblib.load(os.path.join(MODELS_DIR, "aero_model.pkl"))
         aero_scaler = joblib.load(os.path.join(MODELS_DIR, "aero_scaler.pkl"))
         noise_model = joblib.load(os.path.join(MODELS_DIR, "noise_model.pkl"))
         noise_scaler = joblib.load(os.path.join(MODELS_DIR, "noise_scaler.pkl"))
-        
+
         GLOBAL_ERROR_STATE = "ALL SYSTEMS GO"
         print("✅ ML models loaded successfully")
 
+        return aero_model, aero_scaler, noise_model, noise_scaler
+
     except Exception as e:
         GLOBAL_ERROR_STATE = f"LOAD ERROR: {str(e)}"
-        print("MODEL LOAD FAILED:", GLOBAL_ERROR_STATE)
-        aero_model = None
-        noise_model = None
+        print("❌ MODEL LOAD FAILED:", GLOBAL_ERROR_STATE)
+        return None, None, None, None
 
 # ---------------------------------------------------------
 # FastAPI Init
@@ -55,9 +56,12 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-@app.on_event("startup")
-async def startup_event():
-    load_models()
+# ---------------------------------------------------------
+# Debug Root Endpoint
+# ---------------------------------------------------------
+@app.get("/")
+def root():
+    return {"status": GLOBAL_ERROR_STATE}
 
 # ---------------------------------------------------------
 # Request Schema
@@ -86,22 +90,29 @@ def zero_response(status_msg):
     }
 
 # ---------------------------------------------------------
+# Health Check
+# ---------------------------------------------------------
+@app.get("/v1/ping")
+async def ping_server():
+    return {
+        "status": "SUCCESS",
+        "message": "FastAPI on Vercel is working"
+    }
+
+# ---------------------------------------------------------
 # Simulation Endpoint
 # ---------------------------------------------------------
-@app.get("/api/v1/ping")
-async def ping_server():
-    return {"status": "SUCCESS", "message": "The Vercel Python API is alive and routing correctly!"}
-
-@app.post("/api/v1/simulate")
+@app.post("/v1/simulate")
 async def simulate_physics(req: TelemetryRequest):
-    global GLOBAL_ERROR_STATE
 
-    # Guard: If models failed to load, return error to UI
+    aero_model, aero_scaler, noise_model, noise_scaler = load_models()
+
+    # Guard: model load failure
     if aero_model is None or noise_model is None:
         return zero_response(GLOBAL_ERROR_STATE)
 
     try:
-        # 1. Build Feature Vector (MUST be 69 length based on your setup)
+        # 1. Build Feature Vector
         features = np.array([[ 
             req.alpha, req.velocity, req.wing_area, req.wing_span,
             req.chord_length, req.thrust_n, req.weight_n
@@ -112,7 +123,7 @@ async def simulate_physics(req: TelemetryRequest):
         aero_pred = aero_model.predict(features_scaled)[0]
         Cl, Cd = float(aero_pred[0]), float(aero_pred[1])
 
-        # 3. Physics Math
+        # 3. Physics Calculations
         q = 0.5 * 1.225 * (req.velocity ** 2)
         Lift_N = float(q * req.wing_area * Cl)
         Drag_N = float(abs(q * req.wing_area * Cd))
@@ -131,11 +142,14 @@ async def simulate_physics(req: TelemetryRequest):
         Noise_dB = float(noise_model.predict(noise_scaled)[0])
 
         # 5. Status Logic
-        if FoS <= 1.0: status = "FRACTURE"
-        elif FoS <= 1.5: status = "STRESSED"
-        else: status = "OPTIMAL"
+        if FoS <= 1.0:
+            status = "FRACTURE"
+        elif FoS <= 1.5:
+            status = "STRESSED"
+        else:
+            status = "OPTIMAL"
 
-        # 6. Return Payload
+        # 6. Response
         return {
             "aero": {"Cl": Cl, "Cd": Cd, "Lift_N": Lift_N, "Drag_N": Drag_N},
             "structure": {"Stress_MPa": Stress_MPa, "FoS": FoS},
@@ -148,6 +162,3 @@ async def simulate_physics(req: TelemetryRequest):
         error_msg = f"PREDICT ERROR: {str(e)}"
         print(f"❌ {error_msg}")
         return zero_response(error_msg)
-
-if __name__ == "__main__":
-    uvicorn.run("index:app", host="0.0.0.0", port=8000, reload=True)
