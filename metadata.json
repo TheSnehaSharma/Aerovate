@@ -1,6 +1,6 @@
 {
   "name": "Aerovate",
-  "description": "Rapid Aero Prototyping - Build, Test, Fly",
+  "description": "Rapid Aero Prototyping Tool",
   "requestFramePermissions": [],
   "majorCapabilities": []
 }
