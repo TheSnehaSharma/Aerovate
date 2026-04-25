@@ -62,7 +62,7 @@ async function startServer() {
       let prediction_source = "Classical Math";
 
       try {
-        const scriptPath = path.join(process.cwd(), 'backend', 'neuralfoil_predict.py');
+        const scriptPath = path.join(process.cwd(), 'api', 'neuralfoil_predict.py');
         const payload = JSON.stringify({ coordinates, alpha, Re });
         
         const predictAero = () => new Promise<any>((resolve, reject) => {
