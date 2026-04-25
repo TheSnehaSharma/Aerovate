@@ -1,40 +1,42 @@
-# Start from a lightweight Python base image
+# 1. Use Python 3.10 slim as the foundation
 FROM python:3.10-slim
 
-# Install system dependencies including curl to fetch Node.js
+# 2. Install system dependencies (including math libs for SciPy/AeroSandbox)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     build-essential \
+    libgomp1 \
     && rm -rf /var/lib/apt/lists/*
 
-# Install Node.js (version 20.x)
+# 3. Install Node.js 20
 RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
     && apt-get install -y nodejs \
     && rm -rf /var/lib/apt/lists/*
 
-# Set up the working directory inside the container
 WORKDIR /app
 
-# Copy and install Python dependencies first (takes advantage of Docker caching)
+# 4. Install Python dependencies
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy package data and install Node.js dependencies
+# 5. Install Node dependencies 
 COPY package.json package-lock.json* ./
-RUN npm ci || npm install
+RUN npm install --legacy-peer-deps
 
-# Copy the rest of the application files containing your source code
+# 6. Copy the entire project
 COPY . .
 
-# Build the React frontend using Vite
+# 7. Build the Vite/React frontend
 RUN npm run build
 
-# Configure environment variables
+# 8. Set Production Environment
 ENV NODE_ENV=production
-ENV PORT=3000
+# Render uses 10000 by default. This makes it dynamic.
+ENV PORT=10000
 
-# Expose the server port
-EXPOSE 3000
+# 9. Expose the port
+EXPOSE 10000
 
-# Start your application server using tsx
-CMD ["npx", "tsx", "server.ts"]
+# 10. Start the server
+# We use '0.0.0.0' to ensure it's accessible externally
+CMD ["npx", "tsx", "server.ts", "--port", "10000"]
