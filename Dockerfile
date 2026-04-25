@@ -1,42 +1,33 @@
-# 1. Use Python 3.10 slim as the foundation
 FROM python:3.10-slim
 
-# 2. Install system dependencies (including math libs for SciPy/AeroSandbox)
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    curl \
-    build-essential \
-    libgomp1 \
-    && rm -rf /var/lib/apt/lists/*
+# Install system dependencies
+RUN apt-get update && apt-get install -y curl build-essential
 
-# 3. Install Node.js 20
-RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
-    && apt-get install -y nodejs \
-    && rm -rf /var/lib/apt/lists/*
+# Install Node.js
+RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
+RUN apt-get install -y nodejs
 
+# Set working directory
 WORKDIR /app
 
-# 4. Install Python dependencies
+# Install Python dependencies first
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# 5. Install Node dependencies 
+# Install Node dependencies (ignores package-lock missing state if not present)
 COPY package.json package-lock.json* ./
-RUN npm install --legacy-peer-deps
+RUN npm install
 
-# 6. Copy the entire project
+# Copy project files
 COPY . .
 
-# 7. Build the Vite/React frontend
+# Build the client app
 RUN npm run build
 
-# 8. Set Production Environment
+# Start the server (Node.js will spawn Python processes as needed)
+ENV PORT=3000
 ENV NODE_ENV=production
-# Render uses 10000 by default. This makes it dynamic.
-ENV PORT=10000
+EXPOSE 3000
 
-# 9. Expose the port
-EXPOSE 10000
-
-# 10. Start the server
-# We use '0.0.0.0' to ensure it's accessible externally
-CMD ["npx", "tsx", "server.ts", "--port", "10000"]
+# server.ts runs natively using Node via tsx (installed in devDependencies)
+CMD ["npx", "tsx", "server.ts"]
