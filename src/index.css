@@ -1,0 +1,30 @@
+@import "tailwindcss";
+
+@layer utilities {
+  .hud-slider {
+    @apply appearance-none bg-transparent;
+  }
+  .hud-slider::-webkit-slider-runnable-track {
+    @apply h-1 bg-zinc-800 rounded-none border-y border-white/5;
+  }
+  .hud-slider::-webkit-slider-thumb {
+    @apply appearance-none w-2 h-4 bg-cyan-400 cursor-pointer -mt-1.5 shadow-[0_0_10px_rgba(34,211,238,0.5)] border border-cyan-200 transition-transform hover:scale-x-150;
+  }
+  .hud-slider::-moz-range-track {
+    @apply h-1 bg-zinc-800 rounded-none border-y border-white/5;
+  }
+  .hud-slider::-moz-range-thumb {
+    @apply border-none w-2 h-4 bg-cyan-400 cursor-pointer shadow-[0_0_10px_rgba(34,211,238,0.5)] border border-cyan-200 transition-transform hover:scale-x-150;
+  }
+
+  .hud-slider-alt::-webkit-slider-thumb {
+    @apply bg-emerald-400 shadow-[0_0_10px_rgba(52,211,153,0.5)] border border-emerald-200;
+  }
+  .hud-slider-alt::-moz-range-thumb {
+    @apply border-none bg-emerald-400 shadow-[0_0_10px_rgba(52,211,153,0.5)] border border-emerald-200;
+  }
+
+  .glass-panel {
+    @apply bg-[#02080D]/90 backdrop-blur-md shadow-[inset_0_1px_1px_rgba(255,255,255,0.05)];
+  }
+}

@@ -1,0 +1,8 @@
+node_modules
+dist
+.git
+.gitignore
+.venv
+__pycache__
+README.md
+Aerovate.png
